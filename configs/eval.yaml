@@ -1,0 +1,22 @@
+# Evaluation configuration (Phase 4 baseline, Phase 7 final table).
+generator:
+  model: "qwen2.5:7b"             # the student base model for base+RAG (ollama pull qwen2.5:7b)
+  base_url: "http://localhost:11434/v1"
+  api_key_env: ""
+  temperature: 0.0
+  max_tokens: 1024
+judge:
+  model: "llama3.1:8b"            # DIFFERENT family from the teacher (Qwen); ollama pull llama3.1:8b
+  base_url: "http://localhost:11434/v1"
+  api_key_env: ""
+  temperature: 0.0
+  max_tokens: 512
+eval_set_path: "data/eval/heldout_v1.jsonl"
+retrieval_top_k: 6
+min_claim_overlap: 0.15
+bootstrap_n: 1000            # bootstrap resamples for confidence intervals
+metrics:
+  hallucination: true
+  citation: true
+  refusal: true
+  faithfulness: true

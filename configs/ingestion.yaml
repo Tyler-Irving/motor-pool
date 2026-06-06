@@ -1,0 +1,7 @@
+# Ingestion configuration (Phase 1).
+chunk_target_tokens: 350
+chunk_max_tokens: 512
+chunk_overlap_tokens: 50
+ocr_enabled: false          # the -280 TMs are born-digital; OCR is a wired no-op
+ocr_min_chars_per_page: 10  # below this, a page is treated as scanned
+per_doc_overrides: {}

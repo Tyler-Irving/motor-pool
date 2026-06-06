@@ -1,0 +1,25 @@
+# Corpus binaries: never commit PDFs. Only the manifest and downloader ship.
+corpus/pdfs/
+
+# Build artifacts (regenerable)
+indexes/
+outputs/
+
+# Generated training data (regenerable). The frozen eval set IS committed.
+data/train/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+
+# Local tooling config (not part of the published project)
+.claude/

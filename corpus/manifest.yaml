@@ -1,0 +1,22 @@
+# Corpus manifest. The PDFs themselves are never committed (see .gitignore).
+# Only this manifest and the download script are committed. Each entry is pinned
+# by sha256 at download time (Phase 1) so citations are valid against the exact file.
+#
+# All entries are US Government works (17 USC 105), Distribution Statement A
+# (approved for public release, distribution unlimited).
+tms:
+  - tm_number: "TM 9-2320-280-10"
+    title: "Operator's Manual: Truck, Utility, 1-1/4 Ton, 4x4, M998 Series (HMMWV)"
+    url: "https://www.liberatedmanuals.com/TM-9-2320-280-10.pdf"
+    sha256: "2a2f590ff8b0f81b4570191d9b4ef0271e2771da62b3dfb53a8d77971675a1fe"
+    page_count: 421
+    edition_date: "JANUARY 1996"
+    distribution_statement: "Distribution Statement A"
+
+# Deferred to V2. TM 9-2320-280-20-1 (Unit Maintenance Vol 1, 890pp) was
+# downloaded and evaluated in Phase 3 but is NOT in the V1 corpus: its chapter 2
+# (the bulk) is letter-spaced glyph text and multi-column diagnostic flowcharts
+# that ingest at ~45% messy chunks. V1 keeps the clean operator manual; the
+# maintenance manual needs a dedicated parser (V2). Provenance preserved here:
+#   url:    https://www.liberatedmanuals.com/TM-9-2320-280-20-1.pdf
+#   sha256: 8660e148f7c5bf64242cb8ac7f5390372f3d3b85f333cc095215ab5587889fe0

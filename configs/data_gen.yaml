@@ -1,0 +1,24 @@
+# Distillation data-generation configuration (Phase 5).
+teacher:
+  # Rejection-sampling self-distillation: the base model generates candidates and
+  # only validated ones become training data. qwen3:30b (stronger) was tried but
+  # its thinking mode breaks the nested cited-JSON contract; qwen2.5:7b emits
+  # clean JSON. The validation gate (different-family judge) is what assures quality.
+  model: "qwen2.5:7b"
+  base_url: "http://localhost:11434/v1"
+  api_key_env: ""                 # blank for local; name an env var for a hosted API
+  temperature: 0.0
+  max_tokens: 1024
+target_pairs: 2500
+over_generation_factor: 1.8    # generate ~1.8x, the validator rejects the surplus
+# answerable fraction is derived from the answerable_* buckets below (0.40 + 0.25 = 0.65)
+bucket_mix:
+  answerable_procedural: 0.40
+  answerable_factual: 0.25
+  hard_negative: 0.15
+  out_of_scope: 0.12
+  ambiguous: 0.08
+validator:
+  require_citation_per_step: true
+  min_claim_chunk_overlap: 0.15
+  reject_unsupported_numbers: true
