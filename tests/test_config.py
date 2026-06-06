@@ -34,7 +34,7 @@ def test_shipped_config_validates(path: str, model: type) -> None:
 
 def test_training_config_key_values() -> None:
     t = load_config("configs/training.yaml", TrainingConfig)
-    assert t.model.base_model_id == "Qwen/Qwen2.5-7B-Instruct"
+    assert t.model.base_model_id == "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
     assert t.lora.target_modules[0] == "q_proj"
     # The chatml marker must keep its trailing newline through yaml decoding.
     assert t.data.instruction_part == "<|im_start|>user\n"

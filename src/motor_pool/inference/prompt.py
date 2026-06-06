@@ -16,6 +16,7 @@ from motor_pool.schemas import (
     GroundedAnswer,
     ModelAnswer,
     ModelOutput,
+    ModelStep,
     ProcedureStep,
     Refusal,
     RetrievedChunk,
@@ -82,6 +83,26 @@ def resolve_model_output(
         for s in output.steps
     ]
     return GroundedAnswer(summary=output.summary, steps=steps, citations=cites(output.cited))
+
+
+def to_model_output(target: TrainingTarget, chunks: list[RetrievedChunk]) -> ModelOutput:
+    """Inverse of resolve_model_output: a TrainingTarget -> the [C#]-indexed reply.
+
+    This is what the model is trained to emit, so training targets are built from
+    the stored TrainingRecord by mapping each full citation back to its chunk's
+    1-based index in the retrieved set.
+    """
+    if isinstance(target, Refusal):
+        return target
+    index = {chunk.chunk_id: i + 1 for i, chunk in enumerate(chunks)}
+
+    def cited(citations) -> list[int]:
+        return [index[c.chunk_id] for c in citations if c.chunk_id in index]
+
+    steps = [
+        ModelStep(order=s.order, text=s.text, cited=cited(s.citations)) for s in target.steps
+    ]
+    return ModelAnswer(summary=target.summary, steps=steps, cited=cited(target.citations))
 
 
 def generate_grounded(

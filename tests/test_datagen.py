@@ -96,3 +96,19 @@ def test_sample_questions_covers_buckets_without_dupes() -> None:
     assert {"answerable_procedural", "hard_negative", "ambiguous"} <= buckets
     answerable = [q for q, b in samples if b.startswith("answerable")]
     assert len(answerable) == len(set(answerable))  # no duplicate questions
+
+
+def test_refusals_are_distinct_not_padded() -> None:
+    chunks = [_chunk("2-1", "CONTROLS")]
+
+    def question_fn(chunk, factual, variant):
+        return f"Q {chunk.citation.locator.paragraph} variant {variant}?"
+
+    mix = {
+        "answerable_procedural": 0.2, "answerable_factual": 0.0,
+        "hard_negative": 0.3, "out_of_scope": 0.3, "ambiguous": 0.2,
+    }
+    # High target_n would previously pad ambiguous with 30x duplicates.
+    samples = sample_questions(chunks, bucket_mix=mix, target_n=2000, question_fn=question_fn)
+    refusals = [q for q, b in samples if b in ("hard_negative", "out_of_scope", "ambiguous")]
+    assert len(refusals) == len(set(refusals))

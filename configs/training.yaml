@@ -1,7 +1,7 @@
 # QLoRA training configuration (Phase 6). Defaults are sized for a single
 # RTX 4080 (16GB). Estimated peak ~9-11GB at these settings.
 model:
-  base_model_id: "Qwen/Qwen2.5-7B-Instruct"   # Apache 2.0
+  base_model_id: "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"   # pre-quantized Qwen2.5-7B-Instruct (Apache 2.0)
   max_seq_length: 2048
   load_in_4bit: true
   dtype: null                # null lets Unsloth pick (bf16 on Ada)

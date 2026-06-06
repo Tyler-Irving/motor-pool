@@ -196,11 +196,84 @@ def gen_data(
     typer.echo(f"rejections: {report['rejected']}")
 
 
+@app.command(name="final-eval")
+def final_eval(
+    adapter: Path = typer.Option(Path("outputs/adapter"), help="Finetuned LoRA adapter dir."),
+    base_model: Optional[str] = typer.Option(None, help="Base model id (default: training.yaml)."),
+    limit: Optional[int] = typer.Option(None, help="Score only the first N eval items."),
+    indexes: Path = typer.Option(Path("indexes"), help="Index directory."),
+    eval_config: Path = typer.Option(Path("configs/eval.yaml"), "--eval-config"),
+    retrieval_config: Path = typer.Option(Path("configs/retrieval.yaml"), "--retrieval-config"),
+    training_config: Path = typer.Option(Path("configs/training.yaml"), "--training-config"),
+    out_dir: Path = typer.Option(Path("outputs/final"), help="Results output directory."),
+) -> None:
+    """Run base+RAG and finetuned+RAG via the local model; emit the two-row table."""
+    import gc
+
+    import torch
+
+    from motor_pool.config import EvalConfig, RetrievalConfig, TrainingConfig, load_config
+    from motor_pool.data_gen.validate import make_supports
+    from motor_pool.eval.eval_set import read_eval_set
+    from motor_pool.eval.judge import make_judge
+    from motor_pool.eval.report import emit_table
+    from motor_pool.eval.runner import build_corpus_text, run_eval
+    from motor_pool.ingestion.pipeline import read_chunks_jsonl
+    from motor_pool.inference.grounded_model import GroundedModel
+    from motor_pool.llm import ChatClient
+    from motor_pool.retrieval.embedder_bge import BgeEmbedder
+    from motor_pool.retrieval.hybrid_retriever import load_retriever
+
+    ecfg = load_config(eval_config, EvalConfig)
+    rcfg = load_config(retrieval_config, RetrievalConfig)
+    tcfg = load_config(training_config, TrainingConfig)
+    items = read_eval_set(Path(ecfg.eval_set_path))
+    if limit:
+        items = items[:limit]
+    chunks = read_chunks_jsonl(indexes / "chunks.jsonl")
+    corpus_text = build_corpus_text(chunks)
+    embedder = BgeEmbedder(
+        rcfg.embedder_id, query_prefix=rcfg.query_prefix,
+        doc_prefix=rcfg.doc_prefix, normalize=rcfg.normalize,
+    )
+    retriever = load_retriever(indexes, embedder, rcfg.rrf)
+    supports = make_supports(make_judge(ChatClient.from_config(ecfg.judge)), ecfg.min_claim_overlap)
+
+    scores = []
+    for system, model_name in [
+        ("base+RAG", base_model or tcfg.model.base_model_id),
+        ("finetuned+RAG", str(adapter)),
+    ]:
+        typer.echo(f"loading {system} ({model_name}) ...")
+        model = GroundedModel.load(model_name, max_seq_length=tcfg.model.max_seq_length)
+        typer.echo(f"running {system} over {len(items)} items ...")
+        scores.append(
+            run_eval(
+                system, items, retriever, model.generate, corpus_text, supports,
+                top_k=ecfg.retrieval_top_k, bootstrap_n=ecfg.bootstrap_n, log=typer.echo,
+            )
+        )
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    md_path = emit_table(scores, out_dir=out_dir)
+    typer.echo(f"results -> {md_path}\n")
+    typer.echo(Path(md_path).read_text(encoding="utf-8"))
+
+
 @app.command()
-def train() -> None:
-    """Run config-driven QLoRA training (Phase 6)."""
-    typer.echo("train: not yet implemented (Phase 6).")
-    raise typer.Exit(code=1)
+def train(
+    config_path: Path = typer.Option(Path("configs/training.yaml"), "--config"),
+) -> None:
+    """Run config-driven QLoRA training, saving a LoRA adapter."""
+    from motor_pool.config import TrainingConfig, load_config
+    from motor_pool.training.train import train as run_train
+
+    config = load_config(config_path, TrainingConfig)
+    typer.echo(f"training {config.model.base_model_id} on {config.data.train_path} ...")
+    out = run_train(config)
+    typer.echo(f"adapter saved -> {out}")
 
 
 @app.command(name="build-eval-set")

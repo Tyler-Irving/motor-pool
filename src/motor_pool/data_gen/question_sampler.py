@@ -16,21 +16,43 @@ from ..schemas import Bucket, Chunk
 QuestionFn = Callable[[Chunk, bool, int], str]
 
 # Training refusal pools (distinct questions from the eval set's curated ones).
+# Each bucket is capped at its distinct questions, never padded with duplicates.
 _COMPONENTS = [
-    "alternator", "starter", "water pump", "glow plug", "fuel filter",
-    "serpentine belt", "radiator", "thermostat", "brake caliper", "wheel bearing",
-    "tie rod end", "ball joint", "universal joint", "fuel injector", "oil pump",
-    "power steering pump", "clutch", "timing gear", "cylinder head", "oil cooler",
+    "alternator", "starter", "water pump", "glow plug", "glow plug controller",
+    "fuel filter", "fuel injection pump", "serpentine belt", "radiator", "thermostat",
+    "brake caliper", "wheel bearing", "tie rod end", "ball joint", "universal joint",
+    "fuel injector", "oil pump", "power steering pump", "transfer case",
+    "front differential", "rear differential", "transmission", "cylinder head",
+    "turbocharger",
+]
+_HARD_TEMPLATES = [
+    "How do I replace the {c} at unit maintenance level?",
+    "What is the torque specification for the {c}?",
+    "How do I rebuild the {c}?",
 ]
 _VEHICLES = [
-    "M1 Abrams tank", "Bradley Fighting Vehicle", "Stryker", "UH-60 Black Hawk",
-    "civilian pickup truck", "school bus", "forklift", "M88 recovery vehicle",
+    "M1 Abrams tank", "Bradley Fighting Vehicle", "Stryker", "M88 recovery vehicle",
+    "UH-60 Black Hawk helicopter", "civilian pickup truck", "school bus", "forklift",
+    "passenger sedan", "cargo van",
 ]
-_TASKS = ["change the oil", "replace a tire", "start the engine", "check the coolant", "bleed the brakes"]
+_TASKS = [
+    "change the oil", "replace a tire", "start the engine", "check the coolant",
+    "bleed the brakes", "jump-start the battery",
+]
+_GENERAL = [
+    "What is the capital of France?", "How do I bake sourdough bread?",
+    "What is the weather forecast for tomorrow?", "How do I tune a guitar?",
+    "What languages are spoken in Canada?", "How do I write a resume?",
+    "What is the boiling point of water?", "How do I knit a scarf?",
+]
 _AMBIGUOUS = [
-    "How do I fix it?", "What is the spec?", "Is it broken?", "What should I check?",
+    "How do I fix it?", "What is the procedure?", "Is it broken?", "What should I check?",
     "How often?", "Where is it located?", "What does it mean?", "Can you help with that?",
     "What is wrong?", "How do I do it?", "When is it due?", "What value should it be?",
+    "What are the steps?", "Is that normal?", "Should I be worried?", "What now?",
+    "How much?", "Which one?", "What size?", "Is it safe?", "What is the limit?",
+    "How long?", "What do I need?", "Where do I start?", "What comes next?",
+    "Is it required?", "How tight?", "Which way?", "How many?", "What torque?",
 ]
 
 
@@ -62,14 +84,21 @@ def _answerable(
 
 
 def _refusals(n_hard: int, n_oos: int, n_amb: int) -> list[tuple[str, Bucket]]:
-    hard = [f"How do I replace the {c} at unit maintenance level?" for c in _COMPONENTS]
-    oos = [f"How do I {t} on a {v}?" for v in _VEHICLES for t in _TASKS]
-    amb = (_AMBIGUOUS * (n_amb // len(_AMBIGUOUS) + 1))[:n_amb]
-    return (
+    """Distinct refusal questions, capped at the available templates (no padding)."""
+    hard = [t.format(c=c) for c in _COMPONENTS for t in _HARD_TEMPLATES]
+    oos = [f"How do I {t} on a {v}?" for v in _VEHICLES for t in _TASKS] + _GENERAL
+    out = (
         [(q, "hard_negative") for q in hard[:n_hard]]
         + [(q, "out_of_scope") for q in oos[:n_oos]]
-        + [(q, "ambiguous") for q in amb]
+        + [(q, "ambiguous") for q in _AMBIGUOUS[:n_amb]]
     )
+    seen: set[str] = set()
+    deduped: list[tuple[str, Bucket]] = []
+    for question, bucket in out:
+        if question not in seen:
+            seen.add(question)
+            deduped.append((question, bucket))
+    return deduped
 
 
 def sample_questions(

@@ -107,15 +107,33 @@ motor-pool eval               # base+RAG vs finetuned+RAG, emit results table
 
 ## Evaluation
 
-The deliverable is one table comparing base+RAG against finetuned+RAG over a
-frozen, hand-verified eval set, with the retriever held identical across both
-systems. Metrics: hallucination rate (split into answerable and should-refuse),
-citation accuracy (exists and supports), refusal accuracy (precision, recall,
-F1, over-refusal), and faithfulness. The table is produced in Phase 7.
+base+RAG versus finetuned+RAG over a frozen, hand-verified, section-disjoint eval
+set of 136 items, judged by a local Llama-3.1-8B (a different model family than
+the data-generation teacher; validated against a three-annotator panel at Cohen
+kappa 0.85). Both systems use the same retriever, top_k, chunk set, and local
+4-bit runtime, so the only variable is the LoRA adapter. There is no
+output-format enforcement at generation time, so this measures whether the model
+produces valid cited output on its own. Values are percentages.
 
-```
-(results table goes here)
-```
+| System | Schema-Valid | Refusal F1 | Over-Refuse | Cite-Support | Halluc (ans) | Faithfulness |
+| --- | --- | --- | --- | --- | --- | --- |
+| base+RAG | 52.2 | 13.8 | 4.7 | 81.7 | 9.7 | 94.7 |
+| finetuned+RAG | 89.7 | 89.8 | 4.7 | 81.6 | 11.1 | 93.7 |
+
+The behavior-only fine-tune moves the behaviors it targets and little else:
+
+- Structured-output adherence rises from 52 to 90 percent. The model learns to
+  emit valid cited JSON on its own.
+- Refusal F1 rises from 14 to 90 percent (recall 8 to 88, precision 50 to 92).
+  The base model answers most out-of-scope questions; the finetuned model refuses
+  when the manual does not cover the question, and does not become refusal-happy
+  (over-refusal stays at 4.7 percent).
+- Citation support and faithfulness are essentially unchanged, because retrieval
+  supplies the facts for both systems. Citation existence is 100 percent for both
+  by construction (the model cites the retrieved context).
+
+This is the architecture thesis in numbers: retrieval handles facts, the
+fine-tune handles behavior (citing, structuring, refusing).
 
 ## Model and license notes
 
@@ -161,6 +179,10 @@ client (a different family for the judge). The judge (Llama-3.1-8B) was validate
 against a three-annotator panel on 40 entailment pairs: 92 percent agreement,
 Cohen kappa 0.85, with a slight lean toward over-accepting (86 percent precision,
 100 percent recall), so judged metrics are read as a mild overestimate while the
-deterministic metrics do not depend on it. The full base+RAG baseline runs end
-to end (generator Qwen2.5-7B, judge Llama-3.1-8B). Data generation and training
-remain typed stubs.
+deterministic metrics do not depend on it.
+
+V1 is complete (Phases 0 through 7). Data generation produced 722 validated pairs
+via rejection-sampling self-distillation (a Qwen2.5-7B teacher with the
+different-family judge as the gate). QLoRA training (Unsloth, 4-bit, r16) ran on
+the RTX 4080 in about 17 minutes. The final base versus finetuned results are in
+the Evaluation section above.

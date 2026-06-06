@@ -4,6 +4,7 @@ corpus/pdfs/
 # Build artifacts (regenerable)
 indexes/
 outputs/
+unsloth_compiled_cache/
 
 # Generated training data (regenerable). The frozen eval set IS committed.
 data/train/
