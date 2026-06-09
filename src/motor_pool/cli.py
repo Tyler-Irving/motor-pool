@@ -17,6 +17,34 @@ app = typer.Typer(
 )
 
 
+def _quiet_ml_logging(*, offline: bool = False) -> None:
+    """Silence cosmetic startup chatter from the ML stack for clean CLI output.
+
+    Progress bars and the HF-token nudge are disabled via env (which must be set
+    before the libraries import), and the noisy loggers are raised to ERROR. This
+    only declutters output for interactive use; it changes no behavior. Not used
+    by `index`, where the embedding progress bar is useful build feedback.
+
+    Pass offline=True only when every needed model is already cached (e.g. `query`,
+    which runs after `index` has fetched the embedder). It pins HF to the local
+    cache, which also drops the hub's unauthenticated-request warning. Leave it
+    False for commands that may still need to download (e.g. `final-eval`).
+    """
+    import logging
+    import os
+
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    # transformers resets its own logger level on import, so a plain setLevel is
+    # overridden; this env var sets its default verbosity before it imports.
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    if offline:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    for name in ("huggingface_hub", "transformers", "sentence_transformers", "bm25s", "torchao"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+
 @app.command()
 def download(
     only: list[str] = typer.Option([], "--only", help="Restrict to these TM numbers."),
@@ -90,10 +118,15 @@ def index(
 def query(
     question: str = typer.Argument(..., help="The diagnostic question."),
     top_k: Optional[int] = typer.Option(None, help="Chunks to retrieve (default: config rrf.top_k)."),
+    dedupe: bool = typer.Option(
+        True, "--dedupe/--no-dedupe",
+        help="Collapse multiple chunks of the same paragraph into one cited line.",
+    ),
     indexes: Path = typer.Option(Path("indexes"), help="Index directory."),
     config_path: Path = typer.Option(Path("configs/retrieval.yaml"), "--config", help="Retrieval config."),
 ) -> None:
     """Retrieve the most relevant chunks for a question and print their sources."""
+    _quiet_ml_logging(offline=True)
     from motor_pool.config import RetrievalConfig, load_config
     from motor_pool.retrieval.embedder_bge import BgeEmbedder
     from motor_pool.retrieval.hybrid_retriever import load_retriever
@@ -117,11 +150,22 @@ def query(
     if not results:
         typer.echo("no results")
         return
-    for rank, result in enumerate(results, start=1):
+    if dedupe:
+        # Results arrive sorted by score, so the first chunk seen for a paragraph
+        # is its best; keep that one and count the rest as "+N more".
+        groups: dict[tuple[str, str], list] = {}
+        for result in results:
+            key = (result.citation.source_doc_id, result.citation.locator.paragraph)
+            groups.setdefault(key, []).append(result)
+        display = [(group[0], len(group) - 1) for group in groups.values()]
+    else:
+        display = [(result, 0) for result in results]
+    for rank, (result, extra) in enumerate(display, start=1):
         locator = result.citation.locator
+        more = f"  (+{extra} more chunk{'s' if extra != 1 else ''})" if extra else ""
         typer.echo(
             f"[{rank}] {result.score:.4f}  SOURCE: {result.citation.source_doc_id} "
-            f"para {locator.paragraph} p.{result.citation.tm_page_label}"
+            f"para {locator.paragraph} p.{result.citation.tm_page_label}{more}"
         )
         typer.echo(f"      {result.text.splitlines()[0][:96]}")
 
@@ -208,6 +252,7 @@ def final_eval(
     out_dir: Path = typer.Option(Path("outputs/final"), help="Results output directory."),
 ) -> None:
     """Run base+RAG and finetuned+RAG via the local model; emit the two-row table."""
+    _quiet_ml_logging()
     import gc
 
     import torch
