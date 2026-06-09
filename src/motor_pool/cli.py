@@ -32,15 +32,20 @@ def _quiet_ml_logging(*, offline: bool = False) -> None:
     """
     import logging
     import os
+    import warnings
 
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     # transformers resets its own logger level on import, so a plain setLevel is
     # overridden; this env var sets its default verbosity before it imports.
+    # (unsloth resets it again when it patches a model; GroundedModel.load
+    # re-asserts this for the final-eval path.)
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
     if offline:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    # Library-internal deprecation surfaced on every generate(); not actionable here.
+    warnings.filterwarnings("ignore", message=r".*attention mask API.*", category=FutureWarning)
     for name in ("huggingface_hub", "transformers", "sentence_transformers", "bm25s", "torchao"):
         logging.getLogger(name).setLevel(logging.ERROR)
 

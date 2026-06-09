@@ -37,6 +37,15 @@ class GroundedModel:
             dtype=None,
         )
         FastLanguageModel.for_inference(model)
+        # unsloth bumps transformers' log verbosity back up while patching, which
+        # undoes the CLI's quiet setting and floods later loads/generations with
+        # WARNING-level chatter. Restore quiet only when the CLI asked for it.
+        import os
+
+        if os.environ.get("TRANSFORMERS_VERBOSITY") == "error":
+            from transformers.utils import logging as hf_logging
+
+            hf_logging.set_verbosity_error()
         return cls(model, tokenizer, max_new_tokens)
 
     def generate(self, question: str, chunks: list[RetrievedChunk]) -> TrainingTarget | None:
