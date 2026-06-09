@@ -50,6 +50,40 @@ def _quiet_ml_logging(*, offline: bool = False) -> None:
         logging.getLogger(name).setLevel(logging.ERROR)
 
 
+def _print_agent_result(result) -> None:
+    """Human-readable one-line-per-step trace + the cited answer (the --json flag
+    emits the full GUI-consumable payload instead)."""
+    from motor_pool.schemas import Refusal
+
+    for step in result.trace.steps:
+        decision = step.decision
+        if decision.kind == "call_tool":
+            res = step.result
+            n = len((res.data or {}).get("chunks", [])) if res and res.data else 0
+            ms = f"{res.elapsed_ms:.0f}ms" if res and res.elapsed_ms is not None else ""
+            status = "ok" if (res and res.ok) else f"error:{res.error_kind if res else '?'}"
+            query = decision.args.get("query", "")
+            typer.echo(f"step {step.index + 1}: {decision.tool}(query={query!r}) -> {status}, {n} chunks  {ms}")
+        elif decision.kind == "error":
+            typer.echo(f"step {step.index + 1}: planner error: {decision.message}")
+
+    typer.echo("")
+    answer = result.answer
+    if answer is None:
+        typer.echo(f"(no answer; stop_reason={result.stop_reason})")
+        return
+    if isinstance(answer, Refusal):
+        typer.echo(f"REFUSAL ({answer.reason}): {answer.message}")
+    else:
+        typer.echo(answer.summary)
+        for step in answer.steps:
+            cites = "".join(f"[C{c}]" for c in step.cited)
+            typer.echo(f"  {step.order}. {step.text} {cites}".rstrip())
+        if answer.cited:
+            typer.echo("CITES: " + "".join(f"[C{c}]" for c in answer.cited))
+    typer.echo(f"\nstop_reason: {result.stop_reason}")
+
+
 @app.command()
 def download(
     only: list[str] = typer.Option([], "--only", help="Restrict to these TM numbers."),
@@ -173,6 +207,45 @@ def query(
             f"para {locator.paragraph} p.{result.citation.tm_page_label}{more}"
         )
         typer.echo(f"      {result.text.splitlines()[0][:96]}")
+
+
+@app.command()
+def agent(
+    question: str = typer.Argument(..., help="The diagnostic question."),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit the full AgentResult JSON (GUI-consumable trace)."
+    ),
+    max_steps: Optional[int] = typer.Option(
+        None, "--max-steps", help="Override the tool-call step budget (default: config)."
+    ),
+    indexes: Path = typer.Option(Path("indexes"), help="Index directory."),
+    config_path: Path = typer.Option(Path("configs/agent.yaml"), "--config", help="Agent config."),
+    retrieval_config: Path = typer.Option(Path("configs/retrieval.yaml"), "--retrieval-config"),
+) -> None:
+    """Route a question through the V2 agent (the RAG tool) and print the cited answer."""
+    _quiet_ml_logging(offline=True)
+    from motor_pool.agent.build import build_agent
+    from motor_pool.agent.loop import run_agent
+    from motor_pool.config import AgentConfig, RetrievalConfig, load_config
+
+    cfg = load_config(config_path, AgentConfig)
+    if max_steps is not None:
+        cfg = cfg.model_copy(update={"max_steps": max_steps})
+    rcfg = load_config(retrieval_config, RetrievalConfig)
+    try:
+        planner, registry = build_agent(indexes, cfg, rcfg)
+    except FileNotFoundError:
+        typer.echo(f"index not found under {indexes}; run `motor-pool index` first.")
+        raise typer.Exit(code=1)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1)
+
+    result = run_agent(question, planner=planner, registry=registry, config=cfg)
+    if as_json:
+        typer.echo(result.model_dump_json(indent=2))
+    else:
+        _print_agent_result(result)
 
 
 @app.command(name="gen-data")

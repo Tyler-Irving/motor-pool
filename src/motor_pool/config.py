@@ -200,3 +200,19 @@ class EvalConfig(_Strict):
             "faithfulness": True,
         }
     )
+
+
+# ----------------------------------------------------------------------------
+# Agent (V2.0 shell)
+# ----------------------------------------------------------------------------
+class AgentConfig(_Strict):
+    """The V2.0 agent shell: a planner model plus loop and retrieval bounds."""
+
+    # qwen2.5:7b emits reliable flat JSON; qwen3 thinking mode broke nested
+    # contracts in V1, so the planner stays on the proven model by default.
+    planner: LlmConfig = Field(default_factory=lambda: LlmConfig(model="qwen2.5:7b"))
+    max_steps: int = 6
+    max_consecutive_errors: int = 2
+    retrieval_top_k: int = 6
+    enable_get_procedure: bool = False
+    retrieval_config_path: str = "configs/retrieval.yaml"
