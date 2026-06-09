@@ -1,64 +1,56 @@
 # Motor Pool
 
-A grounded diagnostic assistant over public-domain vehicle technical manuals.
-The anchor vehicle is the HMMWV, using public US Army Technical Manuals (TMs)
-that carry Distribution Statement A (approved for public release).
+**A grounded diagnostic assistant over public-domain HMMWV technical manuals: hybrid retrieval plus a behavior-only QLoRA fine-tune, measured with an honest evaluation harness.**
 
-This is V1 of a two-stage project. V1 builds the retriever and a fine-tuned
-model whose only job is behavior: cite the source section, return structured
-procedures, and refuse when the manuals do not cover the question. V2 will wrap
-the retriever as one tool among deterministic tools. V2 is not built here.
+![Python](https://img.shields.io/badge/python-3.11+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/V1-complete-success)
 
-## Design
+The thesis: **retrieval handles facts, fine-tuning handles behavior.** Manual knowledge is never baked into model weights. The retriever supplies facts in-context at query time; the fine-tuned adapter only governs behavior, learning to cite the source section, return structured procedures, and refuse when the manuals do not cover the question.
 
-Retrieval handles facts. Fine-tuning handles behavior only. Manual knowledge is
-never stored in model weights. The retriever supplies the facts in-context at
-query time; the fine-tuned adapter governs citing, structuring, and refusing.
-Every retrieved chunk carries citation metadata (source TM, paragraph or
-section, page) so answers can point back to the manual.
+## Results
 
-Two consequences of that split:
+base+RAG versus finetuned+RAG over a frozen, hand-verified, section-disjoint eval set of 136 items. Both systems share the same retriever, top_k, chunk set, and local 4-bit runtime, so the only variable is the LoRA adapter. No output-format enforcement at generation time, so this measures whether the model produces valid cited output on its own. Values are percentages.
 
-- The retriever is a clean, tool-callable interface (`retrieve(query, *, top_k,
-  filters) -> list[RetrievedChunk]`). It is stateless and touches no model
-  weights. That is the seam V2 builds on.
-- The fine-tuning data is built so every target is derivable only from the
-  chunks provided in-context, and a validation pass rejects any answer that
-  introduces a fact or citation absent from those chunks.
+| System | Schema-Valid | Refusal F1 | Over-Refuse | Cite-Support | Hallucination | Faithfulness |
+| --- | --- | --- | --- | --- | --- | --- |
+| base+RAG | 52.2 | 13.8 | 4.7 | 81.7 | 9.7 | 94.7 |
+| **finetuned+RAG** | **89.7** | **89.8** | 4.7 | 81.6 | 11.1 | 93.7 |
+
+The behavior-only fine-tune moves exactly the behaviors it targets and little else:
+
+- **Structured-output adherence: 52 to 90 percent.** The model learns to emit valid cited JSON on its own.
+- **Refusal F1: 14 to 90 percent** (recall 8 to 88, precision 50 to 92). It refuses when the manual does not cover the question, without becoming refusal-happy (over-refusal stays flat at 4.7 percent).
+- **Citation support and faithfulness are essentially unchanged,** because retrieval supplies the facts for both systems.
+
+That is the architecture thesis in numbers.
+
+## How it works
+
+- **Hybrid retrieval.** BM25 (bm25s) plus dense embeddings (bge-base-en-v1.5), combined with reciprocal rank fusion. Dense search is brute-force cosine over a numpy array; the corpus is small enough to need no vector database. Every chunk carries citation metadata (source TM, paragraph, page) so answers point back to the manual.
+- **Behavior-only fine-tune.** QLoRA via Unsloth on a Qwen2.5-7B-Instruct base (Apache 2.0), sized for a single RTX 4080 (16GB): 4-bit base, r16, ~17 minutes to train. Training data is self-distilled with rejection sampling and validated so every target is derivable only from its in-context chunks; a validation pass rejects any answer that introduces a fact or citation absent from those chunks.
+- **Honest evaluation.** Deterministic checks (schema-valid, refusal precision/recall/F1, citation existence) carry the headline. The entailment judge is a different model family (Llama-3.1-8B) from the data-generation teacher, and was validated against a three-annotator panel (92 percent agreement, Cohen kappa 0.85) so judged metrics are read as a mild, consistent overestimate.
+- **A clean V2 seam.** The retriever is a stateless, tool-callable interface, `retrieve(query, *, top_k, filters) -> list[RetrievedChunk]`, that touches no model weights. V2 will wrap it as one tool among deterministic tools.
 
 ## Corpus
 
-V1 uses one TM from the M998 (HMMWV) baseline family:
+V1 uses TM 9-2320-280-10, the HMMWV Operator's Manual (421 pages): a public-domain US Government work (17 USC 105) under Distribution Statement A, approved for public release. It ingests into 201 procedure-level chunks across 111 numbered paragraphs, each with a page-accurate citation. No manual PDF is committed; `corpus/manifest.yaml` pins the source URL and sha256, and `motor-pool download` fetches and verifies it. Scoping the corpus to the operator level also sharpens the refusal boundary (operator versus unit and depot maintenance).
 
-- TM 9-2320-280-10, Operator's Manual (421 pages).
+## Quickstart
 
-It is a US Government work (17 USC 105) under Distribution Statement A, and is
-born-digital with selectable text (OCR is wired as a fallback but is not needed
-in practice). The PDF is never committed. `corpus/manifest.yaml` lists it with
-its source URL and a sha256 pinned at download time, and `motor-pool download`
-fetches it into `corpus/pdfs/` (gitignored).
+Requires [uv](https://docs.astral.sh/uv/). Heavy, phase-specific dependencies live in optional groups.
 
-The TM uses classic chapter / section / paragraph numbering, not Work Packages,
-so the procedure-level chunk unit is the numbered paragraph (for example
-2-104.1), with its parent section as context.
+```bash
+uv sync                       # core deps
+uv sync --extra retrieve      # bm25s + embeddings
+uv sync --extra train         # Unsloth QLoRA stack
 
-The unit-maintenance manual (TM 9-2320-280-20-1) was evaluated and deferred to
-V2: its chapter-2 diagnostic flowcharts and letter-spaced text do not ingest
-cleanly with the prose chunker. Keeping the corpus at the operator level also
-gives a crisp scope boundary for the refusal behavior (operator versus unit and
-depot maintenance).
-
-## Stack
-
-- Python, src layout, managed with uv.
-- Hybrid retrieval: BM25 (bm25s) plus dense embeddings (bge-base-en-v1.5),
-  combined with reciprocal rank fusion. Dense search is brute-force cosine over
-  a numpy array; the corpus is small enough that this needs no vector database.
-- Pydantic for every schema.
-- QLoRA fine-tuning via Unsloth on PEFT, bitsandbytes, and TRL, config-driven
-  through yaml. Base model: Qwen2.5-7B-Instruct (Apache 2.0). Defaults are sized
-  for a single RTX 4080 (16GB): 4-bit base, gradient checkpointing, sequence
-  length 2048.
+motor-pool download           # fetch corpus PDF, verify sha256
+motor-pool ingest             # parse and chunk into indexes/chunks.jsonl
+motor-pool index              # build the dense + bm25 indexes
+motor-pool query "How do I check the engine oil level?"   # retrieve cited chunks
+motor-pool final-eval         # base+RAG vs finetuned+RAG, emit the results table
+```
 
 ## Layout
 
@@ -66,8 +58,6 @@ depot maintenance).
 configs/      yaml config per stage (retrieval, ingestion, data_gen, training, eval)
 corpus/       manifest + download script (PDFs gitignored)
 data/         frozen eval set (committed); generated training pairs (gitignored)
-indexes/      build artifacts: chunks.jsonl, dense embeddings, bm25 index (gitignored)
-outputs/      adapters, eval tables, run logs (gitignored)
 src/motor_pool/
   schemas/    the shared Pydantic contract
   ingestion/  PDF parse, structure detection, procedure-level chunking
@@ -80,109 +70,6 @@ src/motor_pool/
 tests/        schema, RRF, canonicalization, and config tests
 ```
 
-## Install
+## License
 
-Requires uv. The default install is light (pydantic, pyyaml, typer, numpy).
-Heavy and phase-specific dependencies live in optional groups and are installed
-per stage.
-
-```
-uv sync                       # core deps
-uv sync --extra ingest        # Phase 1: PDF parsing
-uv sync --extra retrieve      # Phase 2: bm25s + embeddings
-uv sync --extra train         # Phase 6: Unsloth QLoRA stack
-```
-
-## Usage
-
-```
-motor-pool download           # fetch corpus PDFs, verify sha256
-motor-pool ingest             # parse and chunk into indexes/chunks.jsonl
-motor-pool index              # build the dense + bm25 indexes
-motor-pool query "..."        # retrieve chunks (and answer, once trained)
-motor-pool gen-data           # build distillation training pairs
-motor-pool train              # config-driven QLoRA
-motor-pool eval               # base+RAG vs finetuned+RAG, emit results table
-```
-
-## Evaluation
-
-base+RAG versus finetuned+RAG over a frozen, hand-verified, section-disjoint eval
-set of 136 items, judged by a local Llama-3.1-8B (a different model family than
-the data-generation teacher; validated against a three-annotator panel at Cohen
-kappa 0.85). Both systems use the same retriever, top_k, chunk set, and local
-4-bit runtime, so the only variable is the LoRA adapter. There is no
-output-format enforcement at generation time, so this measures whether the model
-produces valid cited output on its own. Values are percentages.
-
-| System | Schema-Valid | Refusal F1 | Over-Refuse | Cite-Support | Halluc (ans) | Faithfulness |
-| --- | --- | --- | --- | --- | --- | --- |
-| base+RAG | 52.2 | 13.8 | 4.7 | 81.7 | 9.7 | 94.7 |
-| finetuned+RAG | 89.7 | 89.8 | 4.7 | 81.6 | 11.1 | 93.7 |
-
-The behavior-only fine-tune moves the behaviors it targets and little else:
-
-- Structured-output adherence rises from 52 to 90 percent. The model learns to
-  emit valid cited JSON on its own.
-- Refusal F1 rises from 14 to 90 percent (recall 8 to 88, precision 50 to 92).
-  The base model answers most out-of-scope questions; the finetuned model refuses
-  when the manual does not cover the question, and does not become refusal-happy
-  (over-refusal stays at 4.7 percent).
-- Citation support and faithfulness are essentially unchanged, because retrieval
-  supplies the facts for both systems. Citation existence is 100 percent for both
-  by construction (the model cites the retrieved context).
-
-This is the architecture thesis in numbers: retrieval handles facts, the
-fine-tune handles behavior (citing, structuring, refusing).
-
-## Model and license notes
-
-- Base model Qwen2.5-7B-Instruct is Apache 2.0. The 7B-Instruct size
-  specifically is Apache 2.0; some other Qwen2.5 sizes are not.
-- The fine-tuning artifact is a LoRA adapter, kept separate from the base
-  weights. Loading it requires the base model.
-- The TMs are public-domain US Government works under Distribution Statement A.
-  No manual PDF is committed to this repository.
-
-## Build status
-
-The phased build is tracked in the project plan.
-
-Phase 0 (skeleton) is complete: schemas, RRF, citation canonicalization, and
-config loaders are implemented and tested.
-
-Phase 1 (corpus + ingestion) is complete for the operator manual. `motor-pool
-download` fetches and sha256-verifies the PDF; `motor-pool ingest` parses it into
-201 procedure-level chunks across 111 numbered paragraphs (Chapters 1-3), each
-with a citation whose printed page label is recovered from page geometry.
-Citations were cross-checked against an independent PDF text extractor.
-
-Phase 2 (hybrid retrieval) is complete. `motor-pool index` builds a bm25s lexical
-index and bge-base-en-v1.5 dense embeddings; `motor-pool query` fuses them with
-reciprocal rank fusion and prints cited results. The `Retriever` interface (the
-V2 tool seam) is frozen: a stateless `retrieve(query, *, top_k, filters)`
-returning cited chunks, plus a separate `ProcedureFetcher`.
-
-Phase 3 (unit-maintenance manual) was resolved by scoping it out: TM
-9-2320-280-20-1 ingests at about 45 percent messy chunks (letter-spaced text and
-multi-column diagnostic flowcharts), so V1 keeps the clean 201-chunk operator
-corpus and defers the maintenance manual to a dedicated V2 parser.
-
-Phase 4 (eval scorer + held-out set) is complete. `motor-pool build-eval-set`
-builds a frozen, section-disjoint eval set (answerable questions from held-out
-paragraphs with gold sections, plus curated refusals). `motor-pool eval` runs a
-system over it and emits the results table: refusal precision/recall/F1,
-over-refusal, citation existence and support, hallucination (split by answerable
-vs should-refuse), and faithfulness, with bootstrap confidence intervals.
-Teacher and judge are local models via ollama through one OpenAI-compatible
-client (a different family for the judge). The judge (Llama-3.1-8B) was validated
-against a three-annotator panel on 40 entailment pairs: 92 percent agreement,
-Cohen kappa 0.85, with a slight lean toward over-accepting (86 percent precision,
-100 percent recall), so judged metrics are read as a mild overestimate while the
-deterministic metrics do not depend on it.
-
-V1 is complete (Phases 0 through 7). Data generation produced 722 validated pairs
-via rejection-sampling self-distillation (a Qwen2.5-7B teacher with the
-different-family judge as the gate). QLoRA training (Unsloth, 4-bit, r16) ran on
-the RTX 4080 in about 17 minutes. The final base versus finetuned results are in
-the Evaluation section above.
+MIT (see `LICENSE`). The base model Qwen2.5-7B-Instruct is Apache 2.0; the fine-tuning artifact is a LoRA adapter kept separate from the base weights. The technical manuals are public-domain US Government works under Distribution Statement A, and no manual PDF is committed to this repository.
