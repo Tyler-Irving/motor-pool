@@ -1,0 +1,13 @@
+# V2.0 agent shell. The agent routes a question through tool calls (currently just
+# the V1 retriever) and finishes with a grounded, cited answer or a refusal.
+planner:
+  model: qwen2.5:7b           # reliable flat JSON; qwen3 thinking mode broke nested contracts in V1
+  base_url: http://localhost:11434/v1
+  api_key_env: ""
+  temperature: 0.0
+  max_tokens: 1024
+max_steps: 6                  # tool-call step budget; guarantees loop termination
+max_consecutive_errors: 2     # abort a planner that keeps emitting invalid decisions
+retrieval_top_k: 6            # default top_k passed to the retrieve tool (matches eval.yaml)
+enable_get_procedure: false   # register the get_procedure stub as a second tool
+retrieval_config_path: configs/retrieval.yaml

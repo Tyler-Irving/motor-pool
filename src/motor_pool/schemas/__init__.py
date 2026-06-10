@@ -6,6 +6,19 @@ contract consumed by ingestion, retrieval, data_gen, training, eval, and the CLI
 
 from __future__ import annotations
 
+from .agent import (
+    AgentResult,
+    AgentStep,
+    AgentTrace,
+    CallTool,
+    ErrorKind,
+    Finish,
+    PlannerDecision,
+    PlannerError,
+    StopReason,
+    ToolResult,
+    ToolSpec,
+)
 from .answer import (
     GroundedAnswer,
     ModelAnswer,
@@ -23,6 +36,18 @@ from .manifest import CorpusManifest, IndexManifest, TmEntry
 from .retrieval import RetrievalFilters, RrfConfig
 
 __all__ = [
+    # agent
+    "AgentResult",
+    "AgentStep",
+    "AgentTrace",
+    "CallTool",
+    "ErrorKind",
+    "Finish",
+    "PlannerDecision",
+    "PlannerError",
+    "StopReason",
+    "ToolResult",
+    "ToolSpec",
     # citation
     "Citation",
     "Locator",

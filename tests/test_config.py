@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from motor_pool.config import (
+    AgentConfig,
     DataGenConfig,
     EvalConfig,
     IngestionConfig,
@@ -24,6 +25,7 @@ CONFIGS = [
     ("configs/data_gen.yaml", DataGenConfig),
     ("configs/training.yaml", TrainingConfig),
     ("configs/eval.yaml", EvalConfig),
+    ("configs/agent.yaml", AgentConfig),
 ]
 
 
